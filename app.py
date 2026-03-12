@@ -82,9 +82,17 @@ Responde SOLO con JSON válido, sin markdown, sin explicación adicional:
 
 # ── FUNCIONES CORE ─────────────────────────────────────────────────────────────
 
+def limpiar_texto(texto: str, max_chars: int = 800) -> str:
+    """Elimina HTML, normaliza espacios y limita longitud."""
+    texto = re.sub(r'<[^>]+>', ' ', str(texto or ''))
+    texto = re.sub(r'&[a-z]+;', ' ', texto)   # entidades HTML (&amp; etc)
+    texto = re.sub(r'\s+', ' ', texto).strip()
+    return texto[:max_chars]
+
+
 def build_prompt(row: pd.Series, entidad: str, atributos: list[str]) -> str:
-    cuerpo = str(row.get('cuerpo', '') or '')[:1000]
-    titulo = str(row.get('titulo', '') or '')
+    cuerpo = limpiar_texto(str(row.get('cuerpo', '') or ''), 800)
+    titulo = limpiar_texto(str(row.get('titulo', '') or ''), 200)
     return f"""Analiza esta nota de prensa sobre "{entidad}".
 
 LISTA DE ATRIBUTOS POSIBLES:
