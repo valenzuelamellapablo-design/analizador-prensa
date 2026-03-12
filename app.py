@@ -198,11 +198,17 @@ def main():
     with st.sidebar:
         st.markdown(f"### ⚙️ Configuración")
 
-        api_key = st.text_input(
-            "API Key de Anthropic",
-            type="password",
-            help="Tu clave de la API de Anthropic. No se guarda."
-        )
+        # Lee desde Streamlit Secrets si está disponible, si no pide al usuario
+        secret_key = st.secrets.get("ANTHROPIC_API_KEY", "") if hasattr(st, "secrets") else ""
+        if secret_key:
+            api_key = secret_key
+            st.success("✓ API Key cargada desde Secrets")
+        else:
+            api_key = st.text_input(
+                "API Key de Anthropic",
+                type="password",
+                help="Tu clave de la API de Anthropic. No se guarda."
+            )
 
         st.markdown("---")
         entidad = st.text_input(
@@ -346,17 +352,104 @@ def main():
 
                     st.info(f"Procesando {len(indices)} notas. Puedes detener y continuar luego.")
 
-                    prog_bar  = st.progress(0, text="Iniciando...")
-                    nota_info = st.empty()
+                    # ── UI en vivo ──
+                    prog_bar   = st.progress(0, text="Iniciando...")
+                    nota_info  = st.empty()
+
+                    # Contadores en vivo
+                    kpi_cols = st.columns(4)
+                    kpi_real = kpi_cols[0].empty()
+                    kpi_sec  = kpi_cols[1].empty()
+                    kpi_ref  = kpi_cols[2].empty()
+                    kpi_err  = kpi_cols[3].empty()
+
+                    st.markdown("**Feed en vivo — últimas notas analizadas**")
+                    feed      = st.empty()   # tabla que se actualiza
                     error_log = []
+                    feed_rows = []           # acumula filas para mostrar
+
+                    PROT_COLOR = {
+                        'real':       '#1a6b3a',
+                        'secundario': '#7a5a0a',
+                        'referencial':'#4a4a4a',
+                    }
+                    SENT_COLOR = {
+                        'positivo': '#1a6b3a',
+                        'negativo': '#8b1a1a',
+                        'neutro':   '#4a4a4a',
+                    }
+
+                    def render_feed(rows):
+                        """Renderiza tabla HTML del feed en vivo."""
+                        if not rows:
+                            return
+                        filas_html = ""
+                        for r in reversed(rows[-30:]):  # últimas 30, más reciente arriba
+                            pc = PROT_COLOR.get(r['prot'], '#444')
+                            sc = SENT_COLOR.get(r['sent'], '#444')
+                            filas_html += f"""
+                            <tr style="border-bottom:1px solid #e0d8cc;font-size:11px">
+                              <td style="padding:5px 6px;color:#666">{r['n']}</td>
+                              <td style="padding:5px 6px;max-width:280px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis">{r['titulo']}</td>
+                              <td style="padding:5px 6px;color:#888">{r['medio']}</td>
+                              <td style="padding:5px 6px;color:#888">{r['anio']} {r['trim']}</td>
+                              <td style="padding:5px 6px"><span style="background:{pc};color:white;border-radius:3px;padding:1px 6px;font-size:10px">{r['prot']}</span></td>
+                              <td style="padding:5px 6px;font-size:10px;color:#555;max-width:200px">{r['attrs'][:60] or '—'}</td>
+                              <td style="padding:5px 6px;font-size:10px;color:#666">{r['vocero'][:25] or '—'}</td>
+                              <td style="padding:5px 6px"><span style="background:{sc};color:white;border-radius:3px;padding:1px 6px;font-size:10px">{r['sent']}</span></td>
+                            </tr>"""
+                        feed.markdown(f"""
+                        <div style="max-height:380px;overflow-y:auto;border:1px solid #ddd;border-radius:6px">
+                        <table style="width:100%;border-collapse:collapse;font-family:monospace">
+                          <thead>
+                            <tr style="background:#2B3A4E;color:white;font-size:10px;position:sticky;top:0">
+                              <th style="padding:6px;text-align:left">#</th>
+                              <th style="padding:6px;text-align:left">Título</th>
+                              <th style="padding:6px;text-align:left">Medio</th>
+                              <th style="padding:6px;text-align:left">Período</th>
+                              <th style="padding:6px;text-align:left">Protagonismo</th>
+                              <th style="padding:6px;text-align:left">Atributos</th>
+                              <th style="padding:6px;text-align:left">Vocero</th>
+                              <th style="padding:6px;text-align:left">Sentimiento</th>
+                            </tr>
+                          </thead>
+                          <tbody>{filas_html}</tbody>
+                        </table></div>""", unsafe_allow_html=True)
+
+                    def render_kpis(rows):
+                        n_real = sum(1 for r in rows if r['prot'] == 'real')
+                        n_sec  = sum(1 for r in rows if r['prot'] == 'secundario')
+                        n_ref  = sum(1 for r in rows if r['prot'] == 'referencial')
+                        n_e    = sum(1 for r in rows if r['prot'] == 'error')
+                        total  = len(rows) or 1
+                        kpi_real.metric("Real", f"{n_real}", f"{round(n_real/total*100)}%")
+                        kpi_sec.metric("Secundario", f"{n_sec}", f"{round(n_sec/total*100)}%")
+                        kpi_ref.metric("Referencial", f"{n_ref}", f"{round(n_ref/total*100)}%")
+                        kpi_err.metric("Errores", f"{n_e}")
 
                     for j, idx in enumerate(indices):
                         row = df_proc.loc[idx]
-                        nota_info.markdown(f"⏳ **Nota {j+1}/{len(indices)}** — {str(row.get('medio',''))[:40]} · {row.get('anio','')} {row.get('trimestre','')}")
+                        titulo_corto = str(row.get(col_titulo, ''))[:70]
+                        nota_info.markdown(
+                            f"⏳ **Analizando {j+1}/{len(indices)}** — "
+                            f"`{str(row.get('medio',''))[:35]}` · "
+                            f"{row.get('anio','')} {row.get('trimestre','')}"
+                        )
 
                         try:
                             resultado = analizar_nota(client, row, entidad, atributos)
                             st.session_state['resultados'][idx] = resultado
+                            feed_rows.append({
+                                'n':      j + 1,
+                                'titulo': titulo_corto,
+                                'medio':  str(row.get('medio', ''))[:25],
+                                'anio':   str(row.get('anio', '')),
+                                'trim':   str(row.get('trimestre', '')),
+                                'prot':   resultado.get('protagonismo', '?'),
+                                'attrs':  ', '.join(resultado.get('atributos', [])),
+                                'vocero': resultado.get('voceria', {}).get('nombre') or '',
+                                'sent':   resultado.get('sentimiento', '?'),
+                            })
                         except Exception as e:
                             error_log.append(f"Nota {idx}: {str(e)[:80]}")
                             st.session_state['resultados'][idx] = {
@@ -365,8 +458,20 @@ def main():
                                 "voceria": {"nombre": None, "cargo": None, "tipo": "sin_voceria"},
                                 "sentimiento": "neutro", "sentimiento_razon": "Error"
                             }
+                            feed_rows.append({
+                                'n': j+1, 'titulo': titulo_corto,
+                                'medio': str(row.get('medio',''))[:25],
+                                'anio': str(row.get('anio','')),
+                                'trim': str(row.get('trimestre','')),
+                                'prot': 'error', 'attrs': '', 'vocero': '', 'sent': 'error'
+                            })
 
-                        prog_bar.progress((j + 1) / len(indices), text=f"{j+1}/{len(indices)} notas ({round((j+1)/len(indices)*100)}%)")
+                        prog_bar.progress(
+                            (j + 1) / len(indices),
+                            text=f"{j+1}/{len(indices)} notas procesadas ({round((j+1)/len(indices)*100)}%)"
+                        )
+                        render_feed(feed_rows)
+                        render_kpis(feed_rows)
                         time.sleep(delay)
 
                     nota_info.empty()
