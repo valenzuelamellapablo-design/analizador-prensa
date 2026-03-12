@@ -104,12 +104,12 @@ TÍTULO: {titulo}
 CUERPO: {cuerpo}"""
 
 
-def analizar_nota(client: anthropic.Anthropic, row: pd.Series, entidad: str, atributos: list[str]) -> dict:
+def analizar_nota(client: anthropic.Anthropic, row: pd.Series, entidad: str, atributos: list[str], modelo: str = "claude-sonnet-4-6") -> dict:
     """Llama a Claude y retorna el JSON parseado."""
     prompt = build_prompt(row, entidad, atributos)
     msg = client.messages.create(
-        model="claude-sonnet-4-20250514",
-        max_tokens=400,
+        model=modelo,
+        max_tokens=500,
         system=SYSTEM_PROMPT,
         messages=[{"role": "user", "content": prompt}]
     )
@@ -123,7 +123,7 @@ def analizar_nota(client: anthropic.Anthropic, row: pd.Series, entidad: str, atr
         return {
             "atributos": [],
             "protagonismo": "referencial",
-            "protagonismo_razon": "Error parsing",
+            "protagonismo_razon": "Error JSON",
             "voceria": {"nombre": None, "cargo": None, "tipo": "sin_voceria"},
             "sentimiento": "neutro",
             "sentimiento_razon": "Error parsing"
@@ -217,6 +217,13 @@ def main():
                 type="password",
                 help="Tu clave de la API de Anthropic. No se guarda."
             )
+
+        st.markdown("---")
+        modelo = st.text_input(
+            "Modelo de Claude",
+            value="claude-sonnet-4-6",
+            help="Actualiza aquí cuando Anthropic lance nuevas versiones. Consulta los modelos disponibles en console.anthropic.com"
+        )
 
         st.markdown("---")
         entidad = st.text_input(
@@ -445,7 +452,7 @@ def main():
                         )
 
                         try:
-                            resultado = analizar_nota(client, row, entidad, atributos)
+                            resultado = analizar_nota(client, row, entidad, atributos, modelo)
                             st.session_state['resultados'][idx] = resultado
                             feed_rows.append({
                                 'n':      j + 1,
@@ -462,7 +469,7 @@ def main():
                             error_log.append(f"Nota {idx}: {str(e)[:80]}")
                             st.session_state['resultados'][idx] = {
                                 "atributos": [], "protagonismo": "referencial",
-                                "protagonismo_razon": f"Error: {str(e)[:50]}",
+                                "protagonismo_razon": f"Error: {str(e)[:200]}",
                                 "voceria": {"nombre": None, "cargo": None, "tipo": "sin_voceria"},
                                 "sentimiento": "neutro", "sentimiento_razon": "Error"
                             }
